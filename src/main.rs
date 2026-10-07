@@ -33,7 +33,9 @@ const SWEEP_STEPS: u32 = 24;
 const SWEEP_STEP: Duration = Duration::from_millis(28);
 /// The VU needle's fall per tick (rise is instant).
 const FALL: f32 = 0.82;
-const SCALE_COLS: usize = 72;
+/// The dial's widest face, in characters; it's as wide as the window
+/// allows from `dial::MIN_SCALE_COLS` up.
+const MAX_SCALE_COLS: usize = 240;
 
 const APPEARANCES: [(&str, &str); 3] = [("dark", "Dark"), ("light", "Light"), ("system", "System")];
 const FPS: [u32; 4] = [25, 60, 120, 240];
@@ -359,6 +361,14 @@ impl Render for Wireless {
         let status = self.radio.status();
         let station = t.station.map(|i| &self.band[i]);
 
+        // gpui has no zoom: the dial, meters and ticker take the window's
+        // width, and the frequency goes up a size when there's room.
+        let viewport = window.viewport_size();
+        let cell = f32::from(display_size(Scale::X1, window)) / 2.;
+        // Less the slider's readout ("107.9 MHz") to the right of the track.
+        let room_cols = ((f32::from(viewport.width) - 2. * f32::from(space::ROW) - 48.) / cell) as usize - 12;
+        let scale_cols = room_cols.clamp(dial::MIN_SCALE_COLS, MAX_SCALE_COLS);
+        let roomy = f32::from(viewport.width) >= 1400. && f32::from(viewport.height) >= 800.;
         let ink = if on { p.fg } else { p.fg_faint };
         let name = match station {
             Some(st) if on => st.name.to_uppercase(),
@@ -378,7 +388,7 @@ impl Render for Wireless {
                     .flex_row()
                     .items_end()
                     .gap_3()
-                    .child(banner("freq", format!("{:.1}", dial::snap(self.freq))).color(hsla(ink)).shadow())
+                    .child(banner("freq", format!("{:.1}", dial::snap(self.freq))).scale(if roomy { Scale::X2 } else { Scale::X1 }).color(hsla(ink)).shadow())
                     .child(div().display(Scale::X2, window).text_color(hsla(p.fg_dim)).child("FM")),
             )
             .child(
@@ -392,11 +402,11 @@ impl Render for Wireless {
                     .child(div().body(text::SM).text_color(hsla(p.fg_dim)).child(genre)),
             );
 
-        let [marks, needle] = dial::scale(self.freq, &self.band, SCALE_COLS);
+        let [marks, needle] = dial::scale(self.freq, &self.band, scale_cols);
         // The scale's characters are half a display cell wide; the tuning
         // slider's track spans exactly the scale, so the needle and the thumb
         // line up.
-        let cols_px = display_size(Scale::X1, window) / 2. * SCALE_COLS as f32;
+        let cols_px = display_size(Scale::X1, window) / 2. * scale_cols as f32;
         let scale = div()
             .flex()
             .flex_col()
@@ -464,15 +474,16 @@ impl Render for Wireless {
         };
         let tuner = panel("Tuner").meta(lock_meta).child(div().flex().flex_col().gap_4().p_2().child(readout).child(div().flex().flex_col().gap_2().child(scale).child(tune)).child(controls));
 
+        let meter_cells = (scale_cols * 3 / 4).clamp(32, 160);
         let meters = panel("Level").meta(if on { "live" } else { "" }).child(
             div()
                 .flex()
                 .flex_col()
                 .gap_3()
                 .p_2()
-                .child(meter(self.vu[0]).label("L").id("vu-l").segments(32).thresholds(0.7, 0.9))
-                .child(meter(self.vu[1]).label("R").id("vu-r").segments(32).thresholds(0.7, 0.9))
-                .child(ascii_gauge(if on { t.signal } else { 0. }).label("rf").cells(32)),
+                .child(meter(self.vu[0]).label("L").id("vu-l").segments(meter_cells as u32).thresholds(0.7, 0.9))
+                .child(meter(self.vu[1]).label("R").id("vu-r").segments(meter_cells as u32).thresholds(0.7, 0.9))
+                .child(ascii_gauge(if on { t.signal } else { 0. }).label("rf").cells(meter_cells)),
         );
 
         let problem = self.radio.output_error().or(match &status {
@@ -518,9 +529,11 @@ impl Render for Wireless {
                         .min_h_0()
                         .gap(space::ROW)
                         .p(space::ROW)
+                        // Spare height goes around the set, not under it.
+                        .justify_center()
                         .child(tuner)
                         .child(meters)
-                        .child(div().flex().justify_center().child(marquee("ticker", self.ticker()).cells(84).color(hsla(p.fg_dim))))
+                        .child(div().flex().justify_center().child(marquee("ticker", self.ticker()).cells(scale_cols).color(hsla(p.fg_dim))))
                         .when_some(problem, |col, why| {
                             col.child(
                                 div()
@@ -562,9 +575,11 @@ fn main() {
             KeyBinding::new("up", VolumeUp, None),
             KeyBinding::new("down", VolumeDown, None),
         ]);
-        let options = chrome::window_options("Wireless", size(px(900.), px(560.)), cx);
+        // Wide enough for the dial's narrowest face at 150%.
+        let options = chrome::remembered_window_options("wireless", "Wireless", size(px(1180.), px(620.)), cx);
         cx.open_window(options, |window, cx| {
             chrome::square_corners(window);
+            chrome::remember_window("wireless", window, cx);
             chrome::power_off_on_close(window, cx);
             cx.new(|cx| Wireless::new(window, cx))
         })

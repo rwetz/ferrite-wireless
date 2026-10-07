@@ -8,9 +8,12 @@ pub const HIGH: f32 = 108.0;
 pub const STEP: f32 = 0.1;
 
 /// Within this of a station, reception is perfect.
-const CLEAR: f32 = 0.15;
-/// Beyond `CLEAR + FADE`, the station is gone.
-const FADE: f32 = 0.6;
+const CLEAR: f32 = 0.1;
+/// Beyond `CLEAR + FADE`, the station is gone. With presets every
+/// [`SPACING`] there's still a strip of static between neighbours.
+const FADE: f32 = 0.2;
+/// How far apart the presets sit.
+pub const SPACING: f32 = 0.5;
 /// Below this signal the radio doesn't lock on (no stream is opened).
 pub const LOCK: f32 = 0.3;
 
@@ -27,18 +30,57 @@ fn soma(freq: f32, name: &str, genre: &str, id: &str) -> Station {
     Station { freq, name: name.into(), genre: genre.into(), url: format!("https://ice1.somafm.com/{id}-128-mp3") }
 }
 
-/// The preset band: listener-supported, ad-free SomaFM channels.
+/// SomaFM's year-round channels (listener-supported, ad-free), in dial
+/// order: ambient at the bottom of the band, through electronica, lounge
+/// and soul, to rock, pop and the odd ones at the top. Holiday channels
+/// and the occasional live/specials streams are left off: they're silent
+/// most of the year. `(name, genre, stream id)`.
+const SOMA: [(&str, &str, &str); 37] = [
+    ("Groove Salad", "ambient downtempo", "groovesalad"),
+    ("Groove Salad Classic", "early-2000s chill", "gsclassic"),
+    ("Drone Zone", "atmospheric ambient", "dronezone"),
+    ("Deep Space One", "deep ambient, space music", "deepspaceone"),
+    ("Space Station Soma", "spaced-out ambient, mid-tempo electronica", "spacestation"),
+    ("Mission Control", "ambient with NASA radio", "missioncontrol"),
+    ("Synphaera", "modern space and ambient electronic", "synphaera"),
+    ("The Dark Zone", "dark ambient", "darkzone"),
+    ("n5MD Radio", "ambient, post-rock, IDM", "n5md"),
+    ("Lush", "mellow vocals, electronica", "lush"),
+    ("Fluid", "instrumental hip-hop, lo-fi beats", "fluid"),
+    ("Beat Blender", "deep house, downtempo", "beatblender"),
+    ("Cliqhop IDM", "intelligent dance music", "cliqhop"),
+    ("Dub Step Beyond", "dubstep, deep bass", "dubstep"),
+    ("The Trip", "progressive house, trance", "thetrip"),
+    ("Digitalis", "analog and digital rock", "digitalis"),
+    ("Vaporwaves", "vaporwave", "vaporwaves"),
+    ("PopTron", "electropop, indie dance", "poptron"),
+    ("DEF CON Radio", "music for hacking", "defcon"),
+    ("Suburbs of Goa", "desi-influenced Asian world beats", "suburbsofgoa"),
+    ("Secret Agent", "lounge, spy jazz", "secretagent"),
+    ("Illinois Street Lounge", "classic bachelor-pad exotica", "illstreet"),
+    ("Sonic Universe", "transcending jazz", "sonicuniverse"),
+    ("Seven Inch Soul", "vintage soul 45s", "7soul"),
+    ("Heavyweight Reggae", "reggae, ska, rocksteady", "reggae"),
+    ("Boot Liquor", "Americana roots", "bootliquor"),
+    ("Folk Forward", "indie folk, alt-folk", "folkfwd"),
+    ("ThistleRadio", "Celtic roots", "thistle"),
+    ("Left Coast 70s", "mellow 70s album rock", "seventies"),
+    ("Underground 80s", "UK synthpop, new wave", "u80s"),
+    ("Indie Pop Rocks!", "indie pop", "indiepop"),
+    ("BAGeL Radio", "alternative rock", "bagel"),
+    ("Covers", "songs you know, by artists you don't", "covers"),
+    ("Metal Detector", "heavy metal", "metal"),
+    ("Black Rock FM", "Burning Man's radio", "brfm"),
+    ("SF 10-33", "ambient with San Francisco radio", "sf1033"),
+    ("SF Police Scanner", "the city's scanner, over ambient", "scanner"),
+];
+
+/// Where the first preset sits.
+const FIRST: f32 = 88.1;
+
+/// The preset band: every year-round SomaFM channel, [`SPACING`] apart.
 pub fn presets() -> Vec<Station> {
-    vec![
-        soma(88.9, "Groove Salad", "ambient downtempo", "groovesalad"),
-        soma(91.3, "Fluid", "instrumental hip-hop, lo-fi beats", "fluid"),
-        soma(93.7, "Drone Zone", "atmospheric ambient", "dronezone"),
-        soma(96.1, "Lush", "mellow vocals, electronica", "lush"),
-        soma(98.5, "Deep Space One", "deep ambient, space music", "deepspaceone"),
-        soma(101.1, "Secret Agent", "lounge, spy jazz", "secretagent"),
-        soma(103.3, "Vaporwaves", "vaporwave", "vaporwaves"),
-        soma(105.7, "DEF CON Radio", "music for hacking", "defcon"),
-    ]
+    SOMA.iter().enumerate().map(|(i, (name, genre, id))| soma(snap(FIRST + i as f32 * SPACING), name, genre, id)).collect()
 }
 
 /// A user station from the settings file: `94.1 | Name | genre | url`
@@ -108,6 +150,10 @@ pub fn seek(freq: f32, stations: &[Station], up: bool) -> Option<usize> {
     }
 }
 
+/// The narrowest dial face that still gives every preset its own mark
+/// (two columns per [`SPACING`], and one to spare).
+pub const MIN_SCALE_COLS: usize = ((HIGH - LOW) / SPACING) as usize * 2 + 3;
+
 /// The dial face as text, `cols` wide, in two rows: ticks every MHz with the
 /// stations marked `|`, and the needle `^` under them.
 pub fn scale(freq: f32, stations: &[Station], cols: usize) -> [String; 2] {
@@ -133,7 +179,7 @@ mod tests {
     #[test]
     fn on_a_station_is_clear() {
         let st = presets();
-        let t = tune(91.3, &st);
+        let t = tune(88.6, &st);
         assert_eq!(t.station, Some(1));
         assert_eq!(t.signal, 1.);
         assert_eq!(t.locked(), Some(1));
@@ -143,17 +189,20 @@ mod tests {
     #[test]
     fn signal_fades_through_static() {
         let st = presets();
-        let near = tune(91.6, &st).signal;
-        let far = tune(92.0, &st).signal;
+        let near = tune(88.75, &st).signal;
+        let far = tune(88.82, &st).signal;
         assert!(near < 1. && near > far, "{near} {far}");
-        assert_eq!(tune(92.5, &st), Tuning { station: None, signal: 0. }, "between stations there's only static");
-        assert_eq!(tune(92.5, &st).locked(), None);
+        // Past the last preset the band is empty.
+        assert_eq!(tune(107.5, &st), Tuning { station: None, signal: 0. }, "off the presets there's only static");
+        // Halfway between two presets the signal is too weak to lock.
+        assert_eq!(tune(88.85, &st).locked(), None, "between stations there's static");
     }
 
     #[test]
     fn weak_signal_does_not_lock() {
         let st = presets();
-        let t = tune(91.3 + 0.62, &st);
+        // Midway between two presets: still hears one, too faint to lock.
+        let t = tune(88.85, &st);
         assert!(t.station.is_some() && t.signal < LOCK);
         assert_eq!(t.locked(), None);
     }
@@ -161,12 +210,29 @@ mod tests {
     #[test]
     fn seeks_and_wraps() {
         let st = presets();
+        let last = st.len() - 1;
         assert_eq!(seek(88.0, &st, true), Some(0));
-        assert_eq!(seek(88.9, &st, true), Some(1), "from on a station, seek moves off it");
+        assert_eq!(seek(88.1, &st, true), Some(1), "from on a station, seek moves off it");
         assert_eq!(seek(107.0, &st, true), Some(0), "wraps to the bottom");
-        assert_eq!(seek(88.9, &st, false), Some(7), "wraps to the top");
-        assert_eq!(seek(95.0, &st, false), Some(2));
+        assert_eq!(seek(88.1, &st, false), Some(last), "wraps to the top");
+        assert_eq!(seek(89.3, &st, false), Some(2));
         assert_eq!(seek(95.0, &[], true), None);
+    }
+
+    #[test]
+    fn every_soma_channel_has_its_own_spot() {
+        let st = presets();
+        assert_eq!(st.len(), SOMA.len());
+        assert!(st.iter().all(|s| (LOW..=HIGH).contains(&s.freq)));
+        let ids: std::collections::HashSet<_> = SOMA.iter().map(|c| c.2).collect();
+        assert_eq!(ids.len(), SOMA.len(), "no channel twice");
+        for w in st.windows(2) {
+            assert!((w[1].freq - w[0].freq - SPACING).abs() < 0.01, "{} → {}", w[0].freq, w[1].freq);
+        }
+        // Each one comes in clear on its own frequency.
+        for (i, s) in st.iter().enumerate() {
+            assert_eq!(tune(s.freq, &st).locked(), Some(i), "{}", s.name);
+        }
     }
 
     #[test]
@@ -191,8 +257,8 @@ mod tests {
     #[test]
     fn the_scale_marks_stations_and_needle() {
         let st = presets();
-        let [top, needle] = scale(88.9, &st, 64);
-        assert_eq!(top.chars().count(), 64);
+        let [top, needle] = scale(88.1, &st, MIN_SCALE_COLS);
+        assert_eq!(top.chars().count(), MIN_SCALE_COLS);
         assert_eq!(top.matches('|').count(), st.len());
         let at = |s: &str, c: char| s.chars().position(|x| x == c);
         assert_eq!(at(&needle, '^'), top.chars().position(|c| c == '|'), "the needle sits on the first station");

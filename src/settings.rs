@@ -23,7 +23,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { scheme: "ferrite".into(), appearance: "dark".into(), fps: 240, freq: 91.3, volume: 0.6, stations: Vec::new() }
+        Self { scheme: "ferrite".into(), appearance: "dark".into(), fps: 240, freq: 93.1, volume: 0.6, stations: Vec::new() }
     }
 }
 
