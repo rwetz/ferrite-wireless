@@ -50,6 +50,8 @@ pub struct Radio {
     hiss: Level,
     /// Peak levels since the UI last read them.
     peak: [Level; 2],
+    scope: [Level; 512],
+    scope_cursor: AtomicU32,
     /// Bumped to cancel the running decoder.
     generation: AtomicU64,
     status: Mutex<Status>,
@@ -70,6 +72,8 @@ impl Radio {
             volume: Level::default(),
             hiss: Level::default(),
             peak: Default::default(),
+            scope: std::array::from_fn(|_| Level::default()),
+            scope_cursor: AtomicU32::new(0),
             generation: AtomicU64::new(0),
             status: Mutex::new(Status::Idle),
             title: Mutex::new(None),
@@ -107,6 +111,11 @@ impl Radio {
     /// Peak levels (left, right) since the last call, 0–1.
     pub fn take_peaks(&self) -> [f32; 2] {
         [self.peak[0].0.swap(0, Ordering::Relaxed), self.peak[1].0.swap(0, Ordering::Relaxed)].map(f32::from_bits)
+    }
+
+    pub fn waveform(&self) -> Vec<f32> {
+        let end = self.scope_cursor.load(Ordering::Acquire) as usize;
+        (0..self.scope.len()).map(|i| self.scope[(end + i) % self.scope.len()].get()).collect()
     }
 
     pub fn status(&self) -> Status {
@@ -436,6 +445,7 @@ mod output {
                     let (volume, h) = (radio.volume.get(), radio.hiss.get());
                     let mut peak = [0f32; 2];
                     let mut ring = radio.ring.lock().unwrap();
+                    let mut cursor = radio.scope_cursor.load(Ordering::Relaxed) as usize;
                     for frame in data.chunks_mut(channels) {
                         let music = if on { ring.pop_front().unwrap_or([0.; 2]) } else { [0.; 2] };
                         let noise = hiss.frame();
@@ -445,10 +455,13 @@ mod output {
                             out[ch] = (s * volume).clamp(-1., 1.);
                             peak[ch] = peak[ch].max(out[ch].abs());
                         }
+                        radio.scope[cursor].set((out[0] + out[1]) * 0.5);
+                        cursor = (cursor + 1) % radio.scope.len();
                         for (i, sample) in frame.iter_mut().enumerate() {
                             *sample = T::from_sample(out[i.min(1)]);
                         }
                     }
+                    radio.scope_cursor.store(cursor as u32, Ordering::Release);
                     drop(ring);
                     for (p, held) in peak.iter().zip(&radio.peak) {
                         if *p > held.get() {

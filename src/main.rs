@@ -13,6 +13,7 @@
 mod audio;
 mod dial;
 mod settings;
+mod scope;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -80,10 +81,19 @@ impl Wireless {
             toaster: cx.new(|_| Toaster::new()),
             _appearance: theme::follow_system(window),
         };
+        // Shared launch defaults apply until this app has saved its own preferences.
         set.apply_look(window, cx);
-        // Lodestone hands over its shared look as FERRITE_* variables; when
-        // launched that way, those win over the saved settings.
         theme::apply_env(cx);
+        if Settings::path().is_some_and(|path| path.exists()) {
+            set.apply_look(window, cx);
+        } else {
+            set.settings.scheme = theme::scheme(cx).key.into();
+            set.settings.appearance = match theme::appearance(cx) {
+                Appearance::Light => "light", Appearance::System => "system", Appearance::Dark => "dark",
+            }.into();
+            set.settings.fps = motion::fps();
+            set.apply_look(window, cx);
+        }
         set.set_commands(cx);
         set.power(!std::env::args().any(|a| a == "--off"), cx);
         set
@@ -272,11 +282,11 @@ impl Wireless {
     /// What the marquee says.
     fn ticker(&self) -> String {
         if !self.on {
-            return "WIRELESS · OFF · PRESS SPACE TO SWITCH ON".into();
+            return "WIRELESS Â· OFF Â· PRESS SPACE TO SWITCH ON".into();
         }
         let t = self.tuning();
         match t.station {
-            None => format!("{:.1} FM · NOTHING BUT STATIC · SEEK WITH THE ARROW KEYS", dial::snap(self.freq)),
+            None => format!("{:.1} FM Â· NOTHING BUT STATIC Â· SEEK WITH THE ARROW KEYS", dial::snap(self.freq)),
             Some(i) => {
                 let st = &self.band[i];
                 let state = match self.radio.status() {
@@ -285,7 +295,7 @@ impl Wireless {
                     Status::Playing => self.radio.title().map(|t| format!("NOW PLAYING {t}")).unwrap_or_else(|| "ON AIR".into()),
                     Status::Failed(why) => format!("NO SIGNAL: {why}"),
                 };
-                format!("{:.1} FM · {} · {} · {}", st.freq, st.name, st.genre, state).to_uppercase()
+                format!("{:.1} FM Â· {} Â· {} Â· {}", st.freq, st.name, st.genre, state).to_uppercase()
             }
         }
     }
@@ -293,7 +303,6 @@ impl Wireless {
     fn settings_drawer(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let p = palette(cx);
         let s = &self.settings;
-        let scheme_index = SCHEMES.iter().position(|sc| sc.key == s.scheme);
         let close = {
             let weak = cx.weak_entity();
             move |_: &mut Window, cx: &mut App| {
@@ -314,15 +323,12 @@ impl Wireless {
             .width(px(420.))
             .on_close(close)
             .child(rule(Some("look"), window, cx))
-            .child(
-                field("scheme", "Scheme").child(
-                    select("scheme-select")
-                        .options(SCHEMES.iter().map(|sc| sc.name))
-                        .selected(scheme_index)
-                        .width(px(220.))
-                        .on_change(cx.listener(|this, i: &usize, window, cx| this.change(|s| s.scheme = SCHEMES[*i].key.into(), window, cx))),
-                ),
-            )
+            .child(rule(Some("scheme"), window, cx))
+            .children(SCHEMES.iter().map(|scheme| {
+                Button::new(gpui::ElementId::Name(format!("settings-scheme-{}", scheme.key).into())).label(scheme.name).secondary()
+                    .selected(s.scheme == scheme.key)
+                    .on_click(cx.listener(move |this, _, window, cx| this.change(|s| s.scheme = scheme.key.into(), window, cx)))
+            }))
             .child(
                 field("appearance", "Appearance").child(
                     APPEARANCES.iter().fold(segmented("appearance-seg"), |seg, (_, label)| seg.option(*label))
@@ -425,7 +431,7 @@ impl Render for Wireless {
                 Button::new("seek-down")
                     .icon(Icon::ChevronLeft)
                     .secondary()
-                    .tooltip("Seek down · Left")
+                    .tooltip("Seek down Â· Left")
                     .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.seek(false, cx))),
             )
             .child(
@@ -440,7 +446,7 @@ impl Render for Wireless {
                 Button::new("seek-up")
                     .icon(Icon::ChevronRight)
                     .secondary()
-                    .tooltip("Seek up · Right")
+                    .tooltip("Seek up Â· Right")
                     .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.seek(true, cx))),
             )
             .child(div().flex_1())
@@ -480,7 +486,7 @@ impl Render for Wireless {
             _ => None,
         });
 
-        let gear = Button::new("open-settings").icon(Icon::Sliders).ghost().small().tooltip("Settings · Ctrl+,").on_click(cx.listener(
+        let gear = Button::new("open-settings").icon(Icon::Sliders).ghost().small().tooltip("Settings Â· Ctrl+,").on_click(cx.listener(
             |this, _: &ClickEvent, _, cx| {
                 this.settings_open = !this.settings_open;
                 cx.notify();
@@ -512,14 +518,17 @@ impl Render for Wireless {
                 .child(title_bar("Wireless").child(gear))
                 .child(
                     div()
+                        .id("wireless-content")
                         .flex()
                         .flex_col()
                         .flex_1()
                         .min_h_0()
+                        .overflow_y_scroll()
                         .gap(space::ROW)
                         .p(space::ROW)
                         .child(tuner)
                         .child(meters)
+                        .child(panel("Oscilloscope").meta("OUTPUT · MONO").child(scope::scope(self.radio.waveform(), cx)))
                         .child(div().flex().justify_center().child(marquee("ticker", self.ticker()).cells(84).color(hsla(p.fg_dim))))
                         .when_some(problem, |col, why| {
                             col.child(
@@ -562,7 +571,7 @@ fn main() {
             KeyBinding::new("up", VolumeUp, None),
             KeyBinding::new("down", VolumeDown, None),
         ]);
-        let options = chrome::window_options("Wireless", size(px(900.), px(560.)), cx);
+        let options = chrome::window_options("Wireless", size(px(900.), px(700.)), cx);
         cx.open_window(options, |window, cx| {
             chrome::square_corners(window);
             chrome::power_off_on_close(window, cx);

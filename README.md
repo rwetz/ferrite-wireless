@@ -34,6 +34,8 @@ It's a native desktop app built with [GPUI](https://gpui.rs) and
 
 ## Features
 
+- **Oscilloscope.** A live trace of the mono audio output after volume and static mixing.
+
 - **The dial.** 87.5 to 108.0 MHz in 0.1 steps, with every station marked on
   a text scale and a needle under it. Drag the slider, or seek with
   <kbd>←</kbd> / <kbd>→</kbd> and the dial sweeps to the next station,
@@ -120,7 +122,7 @@ volume = 0.60         # 0–1
 |---|---|
 | `--off` | Starts switched off. |
 | `--settings` | Starts with Settings open. |
-| `FERRITE_*` | The shared look from [Lodestone](https://github.com/rwetz/ferrite-lodestone); wins over the saved scheme and appearance. |
+| `FERRITE_*` | The shared look from [Lodestone](https://github.com/rwetz/ferrite-lodestone); provides defaults until the app saves its own preferences. |
 
 ## With Lodestone
 
