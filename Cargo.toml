@@ -1,6 +1,6 @@
 [package]
 name = "ferrite-wireless"
-version = "0.3.0"
+version = "0.3.1"
 description = "A Ferrite radio: tune between internet stations through static, with a VU meter and the station on a marquee."
 authors = ["Ryan Wetzstein"]
 license = "Apache-2.0"

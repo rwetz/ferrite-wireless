@@ -284,11 +284,11 @@ impl Wireless {
     /// What the marquee says.
     fn ticker(&self) -> String {
         if !self.on {
-            return "WIRELESS Â· OFF Â· PRESS SPACE TO SWITCH ON".into();
+            return "WIRELESS · OFF · PRESS SPACE TO SWITCH ON".into();
         }
         let t = self.tuning();
         match t.station {
-            None => format!("{:.1} FM Â· NOTHING BUT STATIC Â· SEEK WITH THE ARROW KEYS", dial::snap(self.freq)),
+            None => format!("{:.1} FM · NOTHING BUT STATIC · SEEK WITH THE ARROW KEYS", dial::snap(self.freq)),
             Some(i) => {
                 let st = &self.band[i];
                 let state = match self.radio.status() {
@@ -297,7 +297,7 @@ impl Wireless {
                     Status::Playing => self.radio.title().map(|t| format!("NOW PLAYING {t}")).unwrap_or_else(|| "ON AIR".into()),
                     Status::Failed(why) => format!("NO SIGNAL: {why}"),
                 };
-                format!("{:.1} FM Â· {} Â· {} Â· {}", st.freq, st.name, st.genre, state).to_uppercase()
+                format!("{:.1} FM · {} · {} · {}", st.freq, st.name, st.genre, state).to_uppercase()
             }
         }
     }
@@ -441,7 +441,7 @@ impl Render for Wireless {
                 Button::new("seek-down")
                     .icon(Icon::ChevronLeft)
                     .secondary()
-                    .tooltip("Seek down Â· Left")
+                    .tooltip("Seek down · Left")
                     .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.seek(false, cx))),
             )
             .child(
@@ -456,7 +456,7 @@ impl Render for Wireless {
                 Button::new("seek-up")
                     .icon(Icon::ChevronRight)
                     .secondary()
-                    .tooltip("Seek up Â· Right")
+                    .tooltip("Seek up · Right")
                     .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.seek(true, cx))),
             )
             .child(div().flex_1())
@@ -497,7 +497,7 @@ impl Render for Wireless {
             _ => None,
         });
 
-        let gear = Button::new("open-settings").icon(Icon::Sliders).ghost().small().tooltip("Settings Â· Ctrl+,").on_click(cx.listener(
+        let gear = Button::new("open-settings").icon(Icon::Sliders).ghost().small().tooltip("Settings · Ctrl+,").on_click(cx.listener(
             |this, _: &ClickEvent, _, cx| {
                 this.settings_open = !this.settings_open;
                 cx.notify();
