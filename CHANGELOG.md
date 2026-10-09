@@ -4,6 +4,26 @@ All notable changes to Wireless are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.0] - 2026-10-07
+
+### Added
+
+- Every year-round SomaFM channel on the dial: 37 stations, 0.5 MHz apart
+  from 88.1, grouped ambient → electronica → lounge and soul → rock and
+  pop. Reception is tighter to match, so there is still static between
+  them. The holiday channels and SomaFM Live/Specials are left off: they
+  are silent most of the year. Fluid moved to 93.1 (the new default).
+- The dial, meters and ticker are as wide as the window; the frequency
+  goes up a size on a big one. The set sits centered in spare height.
+- The window reopens at the size, place and state it was closed in.
+
+### Fixed
+
+- The scheme picker in Settings opens (its menu was drawn under the
+  drawer; fixed in ferrite-design).
+- The first window is wide enough for the dial at 150% scaling, and fits
+  the screen.
+
 ## [0.1.1] - 2026-10-07
 
 ### Fixed
