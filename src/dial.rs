@@ -27,7 +27,12 @@ pub struct Station {
 }
 
 fn soma(freq: f32, name: &str, genre: &str, id: &str) -> Station {
-    Station { freq, name: name.into(), genre: genre.into(), url: format!("https://ice1.somafm.com/{id}-128-mp3") }
+    Station {
+        freq,
+        name: name.into(),
+        genre: genre.into(),
+        url: format!("https://ice1.somafm.com/{id}-128-mp3"),
+    }
 }
 
 /// SomaFM's year-round channels (listener-supported, ad-free), in dial
@@ -39,10 +44,26 @@ const SOMA: [(&str, &str, &str); 37] = [
     ("Groove Salad", "ambient downtempo", "groovesalad"),
     ("Groove Salad Classic", "early-2000s chill", "gsclassic"),
     ("Drone Zone", "atmospheric ambient", "dronezone"),
-    ("Deep Space One", "deep ambient, space music", "deepspaceone"),
-    ("Space Station Soma", "spaced-out ambient, mid-tempo electronica", "spacestation"),
-    ("Mission Control", "ambient with NASA radio", "missioncontrol"),
-    ("Synphaera", "modern space and ambient electronic", "synphaera"),
+    (
+        "Deep Space One",
+        "deep ambient, space music",
+        "deepspaceone",
+    ),
+    (
+        "Space Station Soma",
+        "spaced-out ambient, mid-tempo electronica",
+        "spacestation",
+    ),
+    (
+        "Mission Control",
+        "ambient with NASA radio",
+        "missioncontrol",
+    ),
+    (
+        "Synphaera",
+        "modern space and ambient electronic",
+        "synphaera",
+    ),
     ("The Dark Zone", "dark ambient", "darkzone"),
     ("n5MD Radio", "ambient, post-rock, IDM", "n5md"),
     ("Lush", "mellow vocals, electronica", "lush"),
@@ -55,9 +76,17 @@ const SOMA: [(&str, &str, &str); 37] = [
     ("Vaporwaves", "vaporwave", "vaporwaves"),
     ("PopTron", "electropop, indie dance", "poptron"),
     ("DEF CON Radio", "music for hacking", "defcon"),
-    ("Suburbs of Goa", "desi-influenced Asian world beats", "suburbsofgoa"),
+    (
+        "Suburbs of Goa",
+        "desi-influenced Asian world beats",
+        "suburbsofgoa",
+    ),
     ("Secret Agent", "lounge, spy jazz", "secretagent"),
-    ("Illinois Street Lounge", "classic bachelor-pad exotica", "illstreet"),
+    (
+        "Illinois Street Lounge",
+        "classic bachelor-pad exotica",
+        "illstreet",
+    ),
     ("Sonic Universe", "transcending jazz", "sonicuniverse"),
     ("Seven Inch Soul", "vintage soul 45s", "7soul"),
     ("Heavyweight Reggae", "reggae, ska, rocksteady", "reggae"),
@@ -72,7 +101,11 @@ const SOMA: [(&str, &str, &str); 37] = [
     ("Metal Detector", "heavy metal", "metal"),
     ("Black Rock FM", "Burning Man's radio", "brfm"),
     ("SF 10-33", "ambient with San Francisco radio", "sf1033"),
-    ("SF Police Scanner", "the city's scanner, over ambient", "scanner"),
+    (
+        "SF Police Scanner",
+        "the city's scanner, over ambient",
+        "scanner",
+    ),
 ];
 
 /// Where the first preset sits.
@@ -80,7 +113,10 @@ const FIRST: f32 = 88.1;
 
 /// The preset band: every year-round SomaFM channel, [`SPACING`] apart.
 pub fn presets() -> Vec<Station> {
-    SOMA.iter().enumerate().map(|(i, (name, genre, id))| soma(snap(FIRST + i as f32 * SPACING), name, genre, id)).collect()
+    SOMA.iter()
+        .enumerate()
+        .map(|(i, (name, genre, id))| soma(snap(FIRST + i as f32 * SPACING), name, genre, id))
+        .collect()
 }
 
 /// A user station from the settings file: `94.1 | Name | genre | url`
@@ -94,7 +130,12 @@ pub fn parse_station(line: &str) -> Option<Station> {
     };
     let freq: f32 = freq.parse().ok()?;
     let url_ok = url.starts_with("http://") || url.starts_with("https://");
-    ((LOW..=HIGH).contains(&freq) && !name.is_empty() && url_ok).then(|| Station { freq: snap(freq), name: name.to_string(), genre: genre.to_string(), url: url.to_string() })
+    ((LOW..=HIGH).contains(&freq) && !name.is_empty() && url_ok).then(|| Station {
+        freq: snap(freq),
+        name: name.to_string(),
+        genre: genre.to_string(),
+        url: url.to_string(),
+    })
 }
 
 pub fn format_station(s: &Station) -> String {
@@ -128,13 +169,23 @@ impl Tuning {
 }
 
 pub fn tune(freq: f32, stations: &[Station]) -> Tuning {
-    let nearest = stations.iter().enumerate().map(|(i, s)| (i, (s.freq - freq).abs())).min_by(|a, b| a.1.total_cmp(&b.1));
+    let nearest = stations
+        .iter()
+        .enumerate()
+        .map(|(i, s)| (i, (s.freq - freq).abs()))
+        .min_by(|a, b| a.1.total_cmp(&b.1));
     match nearest {
         Some((i, d)) => {
             let signal = (1. - (d - CLEAR) / FADE).clamp(0., 1.);
-            Tuning { station: (signal > 0.).then_some(i), signal }
+            Tuning {
+                station: (signal > 0.).then_some(i),
+                signal,
+            }
         }
-        None => Tuning { station: None, signal: 0. },
+        None => Tuning {
+            station: None,
+            signal: 0.,
+        },
     }
 }
 
@@ -144,9 +195,18 @@ pub fn seek(freq: f32, stations: &[Station], up: bool) -> Option<usize> {
     order.sort_by(|a, b| stations[*a].freq.total_cmp(&stations[*b].freq));
     let eps = STEP / 2.;
     if up {
-        order.iter().copied().find(|&i| stations[i].freq > freq + eps).or(order.first().copied())
+        order
+            .iter()
+            .copied()
+            .find(|&i| stations[i].freq > freq + eps)
+            .or(order.first().copied())
     } else {
-        order.iter().rev().copied().find(|&i| stations[i].freq < freq - eps).or(order.last().copied())
+        order
+            .iter()
+            .rev()
+            .copied()
+            .find(|&i| stations[i].freq < freq - eps)
+            .or(order.last().copied())
     }
 }
 
@@ -193,9 +253,20 @@ mod tests {
         let far = tune(88.82, &st).signal;
         assert!(near < 1. && near > far, "{near} {far}");
         // Past the last preset the band is empty.
-        assert_eq!(tune(107.5, &st), Tuning { station: None, signal: 0. }, "off the presets there's only static");
+        assert_eq!(
+            tune(107.5, &st),
+            Tuning {
+                station: None,
+                signal: 0.
+            },
+            "off the presets there's only static"
+        );
         // Halfway between two presets the signal is too weak to lock.
-        assert_eq!(tune(88.85, &st).locked(), None, "between stations there's static");
+        assert_eq!(
+            tune(88.85, &st).locked(),
+            None,
+            "between stations there's static"
+        );
     }
 
     #[test]
@@ -212,7 +283,11 @@ mod tests {
         let st = presets();
         let last = st.len() - 1;
         assert_eq!(seek(88.0, &st, true), Some(0));
-        assert_eq!(seek(88.1, &st, true), Some(1), "from on a station, seek moves off it");
+        assert_eq!(
+            seek(88.1, &st, true),
+            Some(1),
+            "from on a station, seek moves off it"
+        );
         assert_eq!(seek(107.0, &st, true), Some(0), "wraps to the bottom");
         assert_eq!(seek(88.1, &st, false), Some(last), "wraps to the top");
         assert_eq!(seek(89.3, &st, false), Some(2));
@@ -227,7 +302,12 @@ mod tests {
         let ids: std::collections::HashSet<_> = SOMA.iter().map(|c| c.2).collect();
         assert_eq!(ids.len(), SOMA.len(), "no channel twice");
         for w in st.windows(2) {
-            assert!((w[1].freq - w[0].freq - SPACING).abs() < 0.01, "{} → {}", w[0].freq, w[1].freq);
+            assert!(
+                (w[1].freq - w[0].freq - SPACING).abs() < 0.01,
+                "{} → {}",
+                w[0].freq,
+                w[1].freq
+            );
         }
         // Each one comes in clear on its own frequency.
         for (i, s) in st.iter().enumerate() {
@@ -245,7 +325,8 @@ mod tests {
 
     #[test]
     fn user_stations_round_trip() {
-        let s = parse_station("94.1 | KEXP | eclectic | https://kexp.streamguys1.com/kexp160.aac").unwrap();
+        let s = parse_station("94.1 | KEXP | eclectic | https://kexp.streamguys1.com/kexp160.aac")
+            .unwrap();
         assert_eq!(s.name, "KEXP");
         assert_eq!(parse_station(&format_station(&s)), Some(s));
         assert!(parse_station("94.1 | No genre | http://example.com/stream").is_some());
@@ -261,6 +342,10 @@ mod tests {
         assert_eq!(top.chars().count(), MIN_SCALE_COLS);
         assert_eq!(top.matches('|').count(), st.len());
         let at = |s: &str, c: char| s.chars().position(|x| x == c);
-        assert_eq!(at(&needle, '^'), top.chars().position(|c| c == '|'), "the needle sits on the first station");
+        assert_eq!(
+            at(&needle, '^'),
+            top.chars().position(|c| c == '|'),
+            "the needle sits on the first station"
+        );
     }
 }

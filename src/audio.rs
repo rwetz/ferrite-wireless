@@ -110,12 +110,18 @@ impl Radio {
 
     /// Peak levels (left, right) since the last call, 0–1.
     pub fn take_peaks(&self) -> [f32; 2] {
-        [self.peak[0].0.swap(0, Ordering::Relaxed), self.peak[1].0.swap(0, Ordering::Relaxed)].map(f32::from_bits)
+        [
+            self.peak[0].0.swap(0, Ordering::Relaxed),
+            self.peak[1].0.swap(0, Ordering::Relaxed),
+        ]
+        .map(f32::from_bits)
     }
 
     pub fn waveform(&self) -> Vec<f32> {
         let end = self.scope_cursor.load(Ordering::Acquire) as usize;
-        (0..self.scope.len()).map(|i| self.scope[(end + i) % self.scope.len()].get()).collect()
+        (0..self.scope.len())
+            .map(|i| self.scope[(end + i) % self.scope.len()].get())
+            .collect()
     }
 
     pub fn status(&self) -> Status {
@@ -174,7 +180,10 @@ pub struct Static {
 
 impl Static {
     pub fn new(seed: u32) -> Self {
-        Static { state: seed.max(1), low: [0.; 2] }
+        Static {
+            state: seed.max(1),
+            low: [0.; 2],
+        }
     }
 
     fn rand(&mut self) -> f32 {
@@ -188,7 +197,11 @@ impl Static {
     }
 
     pub fn frame(&mut self) -> [f32; 2] {
-        let crackle = if self.rand() > 0.9985 { self.rand() * 2.5 } else { 0. };
+        let crackle = if self.rand() > 0.9985 {
+            self.rand() * 2.5
+        } else {
+            0.
+        };
         let mut out = [0.; 2];
         for (ch, o) in out.iter_mut().enumerate() {
             let white = self.rand();
@@ -213,7 +226,12 @@ pub struct Resampler {
 
 impl Resampler {
     pub fn new(from: u32, to: u32) -> Self {
-        Resampler { from: from.max(1), to: to.max(1), pos: 0., last: [0.; 2] }
+        Resampler {
+            from: from.max(1),
+            to: to.max(1),
+            pos: 0.,
+            last: [0.; 2],
+        }
     }
 
     /// Resample `input` and push the frames to `out`.
@@ -272,7 +290,12 @@ pub struct Icy<R> {
 
 impl<R: Read> Icy<R> {
     pub fn new(inner: R, metaint: usize, on_title: impl FnMut(String) + Send + 'static) -> Self {
-        Icy { inner, metaint, until_meta: metaint, on_title: Box::new(on_title) }
+        Icy {
+            inner,
+            metaint,
+            until_meta: metaint,
+            on_title: Box::new(on_title),
+        }
     }
 }
 
@@ -322,12 +345,22 @@ mod decode {
     /// Connect, decode and feed the ring until the stream ends, fails, or
     /// another station is tuned (`generation` moves on).
     pub fn run(radio: &Arc<Radio>, url: &str, generation: u64) -> Result<(), String> {
-        let resp = ureq::get(url).header("Icy-MetaData", "1").call().map_err(|e| match e {
-            ureq::Error::StatusCode(code) => format!("the station returned HTTP {code}"),
-            _ => "couldn't reach the station".to_string(),
-        })?;
-        let header = |name: &str| resp.headers().get(name).and_then(|v| v.to_str().ok()).map(str::to_string);
-        let metaint = header("icy-metaint").and_then(|v| v.parse().ok()).unwrap_or(0);
+        let resp = ureq::get(url)
+            .header("Icy-MetaData", "1")
+            .call()
+            .map_err(|e| match e {
+                ureq::Error::StatusCode(code) => format!("the station returned HTTP {code}"),
+                _ => "couldn't reach the station".to_string(),
+            })?;
+        let header = |name: &str| {
+            resp.headers()
+                .get(name)
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_string)
+        };
+        let metaint = header("icy-metaint")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
         let mime = header("content-type").unwrap_or_default();
         let titles = radio.clone();
         let body = Icy::new(resp.into_body().into_reader(), metaint, move |t| {
@@ -346,13 +379,28 @@ mod decode {
         let source = ReadOnlySource::new(SyncRead(Mutex::new(Box::new(body))));
         let stream = MediaSourceStream::new(Box::new(source), Default::default());
         let probed = symphonia::default::get_probe()
-            .format(&hint, stream, &FormatOptions::default(), &MetadataOptions::default())
-            .map_err(|_| format!("can't play this stream ({})", if mime.is_empty() { "unknown format" } else { &mime }))?;
+            .format(
+                &hint,
+                stream,
+                &FormatOptions::default(),
+                &MetadataOptions::default(),
+            )
+            .map_err(|_| {
+                format!(
+                    "can't play this stream ({})",
+                    if mime.is_empty() {
+                        "unknown format"
+                    } else {
+                        &mime
+                    }
+                )
+            })?;
         let mut format = probed.format;
         let track = format.default_track().ok_or("the stream has no audio")?;
         let track_id = track.id;
-        let mut decoder =
-            symphonia::default::get_codecs().make(&track.codec_params, &DecoderOptions::default()).map_err(|_| "can't decode this stream's codec".to_string())?;
+        let mut decoder = symphonia::default::get_codecs()
+            .make(&track.codec_params, &DecoderOptions::default())
+            .map_err(|_| "can't decode this stream's codec".to_string())?;
 
         let mut resampler: Option<Resampler> = None;
         let mut started = false;
@@ -418,8 +466,12 @@ mod output {
     use cpal::{FromSample, SampleFormat, SizedSample};
 
     pub fn open(radio: Arc<Radio>) -> Result<cpal::Stream, String> {
-        let device = cpal::default_host().default_output_device().ok_or("no audio output device")?;
-        let supported = device.default_output_config().map_err(|e| format!("the audio device won't say its format: {e}"))?;
+        let device = cpal::default_host()
+            .default_output_device()
+            .ok_or("no audio output device")?;
+        let supported = device
+            .default_output_config()
+            .map_err(|e| format!("the audio device won't say its format: {e}"))?;
         let format = supported.sample_format();
         let config = supported.config();
         let stream = match format {
@@ -429,12 +481,18 @@ mod output {
             SampleFormat::I32 => build::<i32>(&device, &config, radio.clone()),
             other => return Err(format!("unsupported audio format {other}")),
         }?;
-        stream.play().map_err(|e| format!("the audio device won't play: {e}"))?;
+        stream
+            .play()
+            .map_err(|e| format!("the audio device won't play: {e}"))?;
         radio.rate.store(config.sample_rate, Ordering::Relaxed);
         Ok(stream)
     }
 
-    fn build<T: SizedSample + FromSample<f32>>(device: &cpal::Device, config: &cpal::StreamConfig, radio: Arc<Radio>) -> Result<cpal::Stream, String> {
+    fn build<T: SizedSample + FromSample<f32>>(
+        device: &cpal::Device,
+        config: &cpal::StreamConfig,
+        radio: Arc<Radio>,
+    ) -> Result<cpal::Stream, String> {
         let channels = config.channels as usize;
         let mut hiss = Static::new(0x5eed);
         device
@@ -447,11 +505,19 @@ mod output {
                     let mut ring = radio.ring.lock().unwrap();
                     let mut cursor = radio.scope_cursor.load(Ordering::Relaxed) as usize;
                     for frame in data.chunks_mut(channels) {
-                        let music = if on { ring.pop_front().unwrap_or([0.; 2]) } else { [0.; 2] };
+                        let music = if on {
+                            ring.pop_front().unwrap_or([0.; 2])
+                        } else {
+                            [0.; 2]
+                        };
                         let noise = hiss.frame();
                         let mut out = [0f32; 2];
                         for ch in 0..2 {
-                            let s = if on { music[ch] * (1. - h) + noise[ch] * h * STATIC_GAIN } else { 0. };
+                            let s = if on {
+                                music[ch] * (1. - h) + noise[ch] * h * STATIC_GAIN
+                            } else {
+                                0.
+                            };
                             out[ch] = (s * volume).clamp(-1., 1.);
                             peak[ch] = peak[ch].max(out[ch].abs());
                         }
@@ -482,7 +548,10 @@ mod tests {
 
     #[test]
     fn titles_from_icy_metadata() {
-        assert_eq!(stream_title("StreamTitle='Boards of Canada - Dayvan Cowboy';StreamUrl='';").as_deref(), Some("Boards of Canada - Dayvan Cowboy"));
+        assert_eq!(
+            stream_title("StreamTitle='Boards of Canada - Dayvan Cowboy';StreamUrl='';").as_deref(),
+            Some("Boards of Canada - Dayvan Cowboy")
+        );
         assert_eq!(stream_title("StreamTitle='';"), None);
         assert_eq!(stream_title("nothing here"), None);
     }
@@ -510,7 +579,9 @@ mod tests {
     #[test]
     fn without_metaint_icy_passes_through() {
         let mut out = Vec::new();
-        Icy::new(&b"plain"[..], 0, |_| {}).read_to_end(&mut out).unwrap();
+        Icy::new(&b"plain"[..], 0, |_| {})
+            .read_to_end(&mut out)
+            .unwrap();
         assert_eq!(out, b"plain");
     }
 
@@ -543,7 +614,10 @@ mod tests {
     #[test]
     fn stereo_from_any_layout() {
         assert_eq!(to_stereo(&[0.5, -0.5], 1), vec![[0.5, 0.5], [-0.5, -0.5]]);
-        assert_eq!(to_stereo(&[1., 2., 3., 4., 5., 6.], 3), vec![[1., 2.], [4., 5.]]);
+        assert_eq!(
+            to_stereo(&[1., 2., 3., 4., 5., 6.], 3),
+            vec![[1., 2.], [4., 5.]]
+        );
         assert!(to_stereo(&[1.], 0).is_empty());
     }
 }

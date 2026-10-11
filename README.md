@@ -174,3 +174,9 @@ Release commits stay off `main`, so the workflow cannot create a push loop.
 Builds and tests must succeed before publication. Rerunning a workflow reuses
 its tag. Manual `vMAJOR.MINOR.PATCH` tags still work when they match the package
 version. Push feature branches normally; they do not publish releases.
+
+## New integration
+
+Find stations opens Radio Browser search. Compatible direct MP3/AAC/Vorbis streams can be saved and tuned on the dial. HLS and unsupported codecs are excluded. Relay reads Wireless's local now-playing snapshot; stale snapshots expire after ten seconds.
+
+`--smoke` verifies this integration against the live service without opening a window.

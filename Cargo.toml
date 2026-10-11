@@ -12,6 +12,8 @@ edition = "2024"
 rust-version = "1.88"
 
 [dependencies]
+futures = "0.3"
+serde_json = "1"
 ferrite-design = { git = "https://github.com/rwetz/ferrite-design", rev = "4ddbb40bf34e219278784fdcb4e5d0e4e76f4cdc" }
 # Must match ferrite-design exactly (PITFALLS §1).
 gpui = { package = "gpui-pre", version = "=0.3.8" }

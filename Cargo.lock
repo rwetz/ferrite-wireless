@@ -1673,8 +1673,10 @@ version = "0.3.1"
 dependencies = [
  "cpal",
  "ferrite-design",
+ "futures",
  "gpui-pre",
  "gpui-pre-platform",
+ "serde_json",
  "symphonia",
  "ureq",
  "winresource",

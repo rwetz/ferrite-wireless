@@ -23,7 +23,14 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { scheme: "ferrite".into(), appearance: "dark".into(), fps: 240, freq: 93.1, volume: 0.6, stations: Vec::new() }
+        Self {
+            scheme: "ferrite".into(),
+            appearance: "dark".into(),
+            fps: 240,
+            freq: 93.1,
+            volume: 0.6,
+            stations: Vec::new(),
+        }
     }
 }
 
@@ -35,7 +42,9 @@ impl Settings {
             if line.starts_with('#') {
                 continue;
             }
-            let Some((k, v)) = line.split_once('=') else { continue };
+            let Some((k, v)) = line.split_once('=') else {
+                continue;
+            };
             let v = v.trim();
             match k.trim() {
                 "scheme" if !v.is_empty() => s.scheme = v.into(),
@@ -64,7 +73,11 @@ impl Settings {
 
     /// The band: your stations, or the presets.
     pub fn band(&self) -> Vec<Station> {
-        if self.stations.is_empty() { dial::presets() } else { self.stations.clone() }
+        if self.stations.is_empty() {
+            dial::presets()
+        } else {
+            self.stations.clone()
+        }
     }
 
     pub fn path() -> Option<PathBuf> {
@@ -81,7 +94,10 @@ impl Settings {
     }
 
     pub fn load() -> Self {
-        Self::path().and_then(|p| std::fs::read_to_string(p).ok()).map(|s| Self::parse(&s)).unwrap_or_default()
+        Self::path()
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .map(|s| Self::parse(&s))
+            .unwrap_or_default()
     }
 
     pub fn save(&self) -> Result<(), String> {
@@ -105,7 +121,12 @@ mod tests {
             fps: 25,
             freq: 101.1,
             volume: 0.35,
-            stations: vec![dial::parse_station("94.1 | KEXP | eclectic | https://kexp.streamguys1.com/kexp160.aac").unwrap()],
+            stations: vec![
+                dial::parse_station(
+                    "94.1 | KEXP | eclectic | https://kexp.streamguys1.com/kexp160.aac",
+                )
+                .unwrap(),
+            ],
         };
         assert_eq!(Settings::parse(&s.serialize()), s);
     }

@@ -12,14 +12,20 @@
 
 mod audio;
 mod dial;
-mod settings;
+mod probe;
 mod scope;
+mod settings;
+mod stations;
+mod worker;
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use ferrite_design::prelude::*;
-use gpui::{App, AppContext as _, ClickEvent, Context, Entity, IntoElement, KeyBinding, Render, Subscription, Task, Window, div, px, size};
+use gpui::{
+    App, AppContext as _, ClickEvent, Context, Entity, IntoElement, KeyBinding, Render,
+    Subscription, Task, Window, div, px, size,
+};
 
 use audio::{Radio, Status};
 use dial::{Station, Tuning};
@@ -60,10 +66,25 @@ struct Wireless {
     palette: Entity<CommandPalette>,
     toaster: Entity<Toaster>,
     _appearance: Subscription,
+    search_open: bool,
+    query: Entity<TextInput>,
+    _query: Subscription,
+    found: Vec<stations::Found>,
+    search_busy: bool,
+    search_note: String,
+    search_job: Option<Task<()>>,
+    last_publish: std::time::Instant,
 }
 
 impl Wireless {
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let query =
+            cx.new(|cx| TextInput::new(window, cx).placeholder("Search station name, then Enter"));
+        let subscription = cx.subscribe(&query, |this: &mut Self, _, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Submit) {
+                this.search(cx);
+            }
+        });
         let settings = Settings::load();
         let radio = Radio::start(settings.volume);
         let mut set = Self {
@@ -82,6 +103,14 @@ impl Wireless {
             palette: cx.new(|cx| CommandPalette::new(window, cx)),
             toaster: cx.new(|_| Toaster::new()),
             _appearance: theme::follow_system(window),
+            search_open: std::env::args().any(|arg| arg == "--stations"),
+            query,
+            _query: subscription,
+            found: Vec::new(),
+            search_busy: false,
+            search_note: "Search Radio Browser to add a station to the dial".into(),
+            search_job: None,
+            last_publish: std::time::Instant::now(),
         };
         // Shared launch defaults apply until this app has saved its own preferences.
         set.apply_look(window, cx);
@@ -91,13 +120,19 @@ impl Wireless {
         } else {
             set.settings.scheme = theme::scheme(cx).key.into();
             set.settings.appearance = match theme::appearance(cx) {
-                Appearance::Light => "light", Appearance::System => "system", Appearance::Dark => "dark",
-            }.into();
+                Appearance::Light => "light",
+                Appearance::System => "system",
+                Appearance::Dark => "dark",
+            }
+            .into();
             set.settings.fps = motion::fps();
             set.apply_look(window, cx);
         }
         set.set_commands(cx);
         set.power(!std::env::args().any(|a| a == "--off"), cx);
+        if set.search_open {
+            set.search(cx);
+        }
         set
     }
 
@@ -119,12 +154,19 @@ impl Wireless {
 
     fn save(&mut self, cx: &mut Context<Self>) {
         if let Err(err) = self.settings.save() {
-            self.toaster.update(cx, |t, cx| t.push(toast("Couldn't save settings").danger().message(err), cx));
+            self.toaster.update(cx, |t, cx| {
+                t.push(toast("Couldn't save settings").danger().message(err), cx)
+            });
         }
         cx.notify();
     }
 
-    fn change(&mut self, f: impl FnOnce(&mut Settings), window: &mut Window, cx: &mut Context<Self>) {
+    fn change(
+        &mut self,
+        f: impl FnOnce(&mut Settings),
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         f(&mut self.settings);
         self.apply_look(window, cx);
         self.save(cx);
@@ -139,31 +181,81 @@ impl Wireless {
             }
         };
         let mut commands = vec![
-            command("Power on / off").group("Radio").icon(Icon::Play).shortcut("Space").on_run(run(|this, _, cx| this.power(!this.on, cx))),
-            command("Seek up").group("Radio").icon(Icon::ChevronRight).shortcut("Right").on_run(run(|this, _, cx| this.seek(true, cx))),
-            command("Seek down").group("Radio").icon(Icon::ChevronLeft).shortcut("Left").on_run(run(|this, _, cx| this.seek(false, cx))),
-            command("Volume up").group("Radio").icon(Icon::Plus).shortcut("Up").on_run(run(|this, _, cx| this.nudge_volume(0.05, cx))),
-            command("Volume down").group("Radio").icon(Icon::Minus).shortcut("Down").on_run(run(|this, _, cx| this.nudge_volume(-0.05, cx))),
-            command("Settings").group("Radio").icon(Icon::Sliders).shortcut("Ctrl+,").on_run(run(|this, _, cx| {
-                this.settings_open = true;
-                cx.notify();
-            })),
-            command("Dark theme").group("Theme").on_run(run(|this, window, cx| this.change(|s| s.appearance = "dark".into(), window, cx))),
-            command("Light theme").group("Theme").on_run(run(|this, window, cx| this.change(|s| s.appearance = "light".into(), window, cx))),
+            command("Find stations")
+                .group("Radio")
+                .on_run(run(|this, _, cx| {
+                    this.search_open = true;
+                    cx.notify();
+                })),
+            command("Power on / off")
+                .group("Radio")
+                .icon(Icon::Play)
+                .shortcut("Space")
+                .on_run(run(|this, _, cx| this.power(!this.on, cx))),
+            command("Seek up")
+                .group("Radio")
+                .icon(Icon::ChevronRight)
+                .shortcut("Right")
+                .on_run(run(|this, _, cx| this.seek(true, cx))),
+            command("Seek down")
+                .group("Radio")
+                .icon(Icon::ChevronLeft)
+                .shortcut("Left")
+                .on_run(run(|this, _, cx| this.seek(false, cx))),
+            command("Volume up")
+                .group("Radio")
+                .icon(Icon::Plus)
+                .shortcut("Up")
+                .on_run(run(|this, _, cx| this.nudge_volume(0.05, cx))),
+            command("Volume down")
+                .group("Radio")
+                .icon(Icon::Minus)
+                .shortcut("Down")
+                .on_run(run(|this, _, cx| this.nudge_volume(-0.05, cx))),
+            command("Settings")
+                .group("Radio")
+                .icon(Icon::Sliders)
+                .shortcut("Ctrl+,")
+                .on_run(run(|this, _, cx| {
+                    this.settings_open = true;
+                    cx.notify();
+                })),
+            command("Dark theme")
+                .group("Theme")
+                .on_run(run(|this, window, cx| {
+                    this.change(|s| s.appearance = "dark".into(), window, cx)
+                })),
+            command("Light theme")
+                .group("Theme")
+                .on_run(run(|this, window, cx| {
+                    this.change(|s| s.appearance = "light".into(), window, cx)
+                })),
         ];
         for (i, st) in self.band.iter().enumerate() {
             let weak = weak.clone();
-            commands.push(command(format!("Tune: {:.1} {}", st.freq, st.name)).group("Stations").icon(Icon::Dot).on_run(move |_, cx| {
-                let _ = weak.update(cx, |this, cx| this.sweep_to(this.band[i].freq, cx));
-            }));
+            commands.push(
+                command(format!("Tune: {:.1} {}", st.freq, st.name))
+                    .group("Stations")
+                    .icon(Icon::Dot)
+                    .on_run(move |_, cx| {
+                        let _ = weak.update(cx, |this, cx| this.sweep_to(this.band[i].freq, cx));
+                    }),
+            );
         }
         for scheme in SCHEMES {
             let weak = weak.clone();
-            commands.push(command(format!("Scheme: {}", scheme.name)).group("Theme").on_run(move |window, cx| {
-                let _ = weak.update(cx, |this, cx| this.change(|s| s.scheme = scheme.key.into(), window, cx));
-            }));
+            commands.push(
+                command(format!("Scheme: {}", scheme.name))
+                    .group("Theme")
+                    .on_run(move |window, cx| {
+                        let _ = weak.update(cx, |this, cx| {
+                            this.change(|s| s.scheme = scheme.key.into(), window, cx)
+                        });
+                    }),
+            );
         }
-        self.palette.update(cx, |p, cx| p.set_commands(commands, cx));
+        self.palette
+            .update(cx, |p, cx| p.set_commands(commands, cx));
     }
 
     // ── The set ──────────────────────────────────────────────────────────
@@ -191,6 +283,7 @@ impl Wireless {
             self.meter_task = None;
             self.settle_task = None;
             self.vu = [0.; 2];
+            self.publish();
         }
         cx.notify();
     }
@@ -203,8 +296,14 @@ impl Wireless {
             *v = p.max(*v * FALL);
         }
         let t = self.tuning();
-        let through = self.playing.is_some() && self.playing == t.station && self.radio.status() == Status::Playing;
+        let through = self.playing.is_some()
+            && self.playing == t.station
+            && self.radio.status() == Status::Playing;
         self.radio.set_hiss(if through { t.hiss() } else { 1. });
+        if self.last_publish.elapsed() >= Duration::from_secs(1) {
+            self.last_publish = std::time::Instant::now();
+            self.publish();
+        }
         cx.notify();
     }
 
@@ -255,7 +354,11 @@ impl Wireless {
                 // Ease out: fast off the old station, slow onto the new one.
                 let t = step as f32 / SWEEP_STEPS as f32;
                 let eased = 1. - (1. - t).powi(3);
-                let f = if step == SWEEP_STEPS { target } else { from + (target - from) * eased };
+                let f = if step == SWEEP_STEPS {
+                    target
+                } else {
+                    from + (target - from) * eased
+                };
                 if this.update(cx, |this, cx| this.set_freq(f, cx)).is_err() {
                     return;
                 }
@@ -288,13 +391,20 @@ impl Wireless {
         }
         let t = self.tuning();
         match t.station {
-            None => format!("{:.1} FM · NOTHING BUT STATIC · SEEK WITH THE ARROW KEYS", dial::snap(self.freq)),
+            None => format!(
+                "{:.1} FM · NOTHING BUT STATIC · SEEK WITH THE ARROW KEYS",
+                dial::snap(self.freq)
+            ),
             Some(i) => {
                 let st = &self.band[i];
                 let state = match self.radio.status() {
                     _ if t.locked().is_none() => "TOO FAINT TO LOCK ON".to_string(),
                     Status::Connecting | Status::Idle => "TUNING IN".to_string(),
-                    Status::Playing => self.radio.title().map(|t| format!("NOW PLAYING {t}")).unwrap_or_else(|| "ON AIR".into()),
+                    Status::Playing => self
+                        .radio
+                        .title()
+                        .map(|t| format!("NOW PLAYING {t}"))
+                        .unwrap_or_else(|| "ON AIR".into()),
                     Status::Failed(why) => format!("NO SIGNAL: {why}"),
                 };
                 format!("{:.1} FM · {} · {} · {}", st.freq, st.name, st.genre, state).to_uppercase()
@@ -302,7 +412,136 @@ impl Wireless {
         }
     }
 
-    fn settings_drawer(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+    fn publish(&self) {
+        let Some(path) =
+            Settings::path().and_then(|p| p.parent().map(|p| p.join("wireless-now-playing.json")))
+        else {
+            return;
+        };
+        let station = self
+            .playing
+            .and_then(|i| self.band.get(i))
+            .map(|s| s.name.as_str())
+            .unwrap_or_default();
+        let value = serde_json::json!({"version":1,"time":std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs(),"playing":self.on && self.radio.status() == Status::Playing,"station":station,"track":self.radio.title().unwrap_or_default()});
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let temporary = path.with_extension(format!("{}.tmp", std::process::id()));
+        if std::fs::write(&temporary, value.to_string()).is_ok() {
+            let _ = std::fs::rename(&temporary, path);
+        }
+    }
+
+    fn search(&mut self, cx: &mut Context<Self>) {
+        if self.search_busy {
+            return;
+        }
+        let query = self.query.read(cx).value().trim().to_string();
+        self.search_busy = true;
+        self.search_note = "Searching Radio Browser…".into();
+        self.search_job = Some(cx.spawn(async move |this, cx| {
+            let result = worker::run(move || stations::search(&query)).await;
+            let _ = this.update(cx, |this, cx| {
+                this.search_busy = false;
+                match result {
+                    Ok(found) => {
+                        this.search_note =
+                            format!("{} compatible stations · Radio Browser", found.len());
+                        this.found = found;
+                    }
+                    Err(error) => this.search_note = error,
+                }
+                cx.notify();
+            });
+        }));
+        cx.notify();
+    }
+
+    fn add_station(&mut self, station: stations::Found, cx: &mut Context<Self>) {
+        let Some(freq) = stations::free_frequency(&self.band) else {
+            self.search_note =
+                "Dial full. Remove a custom station in your settings file first.".into();
+            cx.notify();
+            return;
+        };
+        self.band.push(Station {
+            freq,
+            name: station.name,
+            genre: station.tags,
+            url: station.url,
+        });
+        self.band.sort_by(|a, b| a.freq.total_cmp(&b.freq));
+        self.settings.stations = self.band.clone();
+        self.save(cx);
+        self.set_commands(cx);
+        self.search_open = false;
+        stations::register_click(station.uuid);
+        self.playing = None;
+        self.radio.stop();
+        if !self.on {
+            self.power(true, cx);
+        }
+        self.set_freq(freq, cx);
+    }
+
+    fn station_drawer(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let weak = cx.weak_entity();
+        let mut rows = div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(self.search_note.clone());
+        for (i, found) in self.found.iter().enumerate() {
+            let station = found.clone();
+            rows = rows.child(
+                panel("Station")
+                    .meta(format!("{} · {}", found.country, found.codec))
+                    .child(div().child(found.name.clone()))
+                    .child(div().child(found.tags.clone()))
+                    .child(
+                        Button::new(("add-found", i))
+                            .label("Add & tune")
+                            .secondary()
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.add_station(station.clone(), cx)
+                            })),
+                    ),
+            );
+        }
+        drawer("station-search")
+            .open(self.search_open)
+            .title("Find stations")
+            .width(px(620.))
+            .on_close(move |_, cx| {
+                let _ = weak.update(cx, |this, cx| {
+                    this.search_open = false;
+                    cx.notify();
+                });
+            })
+            .child(
+                div().flex().gap_2().child(self.query.clone()).child(
+                    Button::new("find-stations")
+                        .label("Search")
+                        .primary()
+                        .disabled(self.search_busy)
+                        .on_click(cx.listener(|this, _, _, cx| this.search(cx))),
+                ),
+            )
+            .child(
+                scroll_area("station-results")
+                    .flex_1()
+                    .min_h_0()
+                    .child(rows),
+            )
+            .into_any_element()
+    }
+
+    fn settings_drawer(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
         let p = palette(cx);
         let s = &self.settings;
         let close = {
@@ -314,7 +553,9 @@ impl Wireless {
                 });
             }
         };
-        let path = Settings::path().map(|p| p.display().to_string()).unwrap_or_else(|| "wireless.conf".into());
+        let path = Settings::path()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "wireless.conf".into());
         let mut stations = property_list();
         for st in &self.band {
             stations = stations.row(format!("{:.1}", st.freq), st.name.clone());
@@ -362,6 +603,12 @@ impl Render for Wireless {
             self.radio.set_on(false);
         }
         let p = palette(cx);
+        if !self.search_busy && !self.found.is_empty() {
+            probe::record(format!(
+                "Radio Browser loaded: {} stations",
+                self.found.len()
+            ));
+        }
         let t = self.tuning();
         let on = self.on;
         let status = self.radio.status();
@@ -372,7 +619,8 @@ impl Render for Wireless {
         let viewport = window.viewport_size();
         let cell = f32::from(display_size(Scale::X1, window)) / 2.;
         // Less the slider's readout ("107.9 MHz") to the right of the track.
-        let room_cols = ((f32::from(viewport.width) - 2. * f32::from(space::ROW) - 48.) / cell) as usize - 12;
+        let room_cols =
+            ((f32::from(viewport.width) - 2. * f32::from(space::ROW) - 48.) / cell) as usize - 12;
         let scale_cols = room_cols.clamp(dial::MIN_SCALE_COLS, MAX_SCALE_COLS);
         let roomy = f32::from(viewport.width) >= 1400. && f32::from(viewport.height) >= 800.;
         let ink = if on { p.fg } else { p.fg_faint };
@@ -381,7 +629,10 @@ impl Render for Wireless {
             _ if on => "STATIC".into(),
             _ => "OFF".into(),
         };
-        let genre = station.filter(|_| on).map(|s| s.genre.clone()).unwrap_or_default();
+        let genre = station
+            .filter(|_| on)
+            .map(|s| s.genre.clone())
+            .unwrap_or_default();
         let readout = div()
             .flex()
             .flex_row()
@@ -394,8 +645,18 @@ impl Render for Wireless {
                     .flex_row()
                     .items_end()
                     .gap_3()
-                    .child(banner("freq", format!("{:.1}", dial::snap(self.freq))).scale(if roomy { Scale::X2 } else { Scale::X1 }).color(hsla(ink)).shadow())
-                    .child(div().display(Scale::X2, window).text_color(hsla(p.fg_dim)).child("FM")),
+                    .child(
+                        banner("freq", format!("{:.1}", dial::snap(self.freq)))
+                            .scale(if roomy { Scale::X2 } else { Scale::X1 })
+                            .color(hsla(ink))
+                            .shadow(),
+                    )
+                    .child(
+                        div()
+                            .display(Scale::X2, window)
+                            .text_color(hsla(p.fg_dim))
+                            .child("FM"),
+                    ),
             )
             .child(
                 div()
@@ -404,7 +665,12 @@ impl Render for Wireless {
                     .items_end()
                     .gap_1()
                     .min_w_0()
-                    .child(div().display(Scale::X2, window).text_color(hsla(ink)).child(decrypt(("station", self.tuned), name)))
+                    .child(
+                        div()
+                            .display(Scale::X2, window)
+                            .text_color(hsla(ink))
+                            .child(decrypt(("station", self.tuned), name)),
+                    )
                     .child(div().body(text::SM).text_color(hsla(p.fg_dim)).child(genre)),
             );
 
@@ -419,7 +685,11 @@ impl Render for Wireless {
             .display(Scale::X1, window)
             .whitespace_nowrap()
             .child(div().text_color(hsla(p.fg_dim)).child(marks))
-            .child(div().text_color(hsla(if on { p.accent } else { p.fg_faint })).child(needle));
+            .child(
+                div()
+                    .text_color(hsla(if on { p.accent } else { p.fg_faint }))
+                    .child(needle),
+            );
 
         let tune = slider("tune")
             .range(dial::LOW, dial::HIGH)
@@ -460,7 +730,12 @@ impl Render for Wireless {
                     .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.seek(true, cx))),
             )
             .child(div().flex_1())
-            .child(div().display(Scale::X1, window).text_color(hsla(p.fg_dim)).child("VOL"))
+            .child(
+                div()
+                    .display(Scale::X1, window)
+                    .text_color(hsla(p.fg_dim))
+                    .child("VOL"),
+            )
             .child(
                 slider("volume")
                     .range(0., 1.)
@@ -478,7 +753,16 @@ impl Render for Wireless {
             (Status::Failed(_), Some(_)) => "no signal",
             _ => "tuning",
         };
-        let tuner = panel("Tuner").meta(lock_meta).child(div().flex().flex_col().gap_4().p_2().child(readout).child(div().flex().flex_col().gap_2().child(scale).child(tune)).child(controls));
+        let tuner = panel("Tuner").meta(lock_meta).child(
+            div()
+                .flex()
+                .flex_col()
+                .gap_4()
+                .p_2()
+                .child(readout)
+                .child(div().flex().flex_col().gap_2().child(scale).child(tune))
+                .child(controls),
+        );
 
         let meter_cells = (scale_cols * 3 / 4).clamp(32, 160);
         let meters = panel("Level").meta(if on { "live" } else { "" }).child(
@@ -487,9 +771,25 @@ impl Render for Wireless {
                 .flex_col()
                 .gap_3()
                 .p_2()
-                .child(meter(self.vu[0]).label("L").id("vu-l").segments(meter_cells as u32).thresholds(0.7, 0.9))
-                .child(meter(self.vu[1]).label("R").id("vu-r").segments(meter_cells as u32).thresholds(0.7, 0.9))
-                .child(ascii_gauge(if on { t.signal } else { 0. }).label("rf").cells(meter_cells)),
+                .child(
+                    meter(self.vu[0])
+                        .label("L")
+                        .id("vu-l")
+                        .segments(meter_cells as u32)
+                        .thresholds(0.7, 0.9),
+                )
+                .child(
+                    meter(self.vu[1])
+                        .label("R")
+                        .id("vu-r")
+                        .segments(meter_cells as u32)
+                        .thresholds(0.7, 0.9),
+                )
+                .child(
+                    ascii_gauge(if on { t.signal } else { 0. })
+                        .label("rf")
+                        .cells(meter_cells),
+                ),
         );
 
         let problem = self.radio.output_error().or(match &status {
@@ -497,13 +797,17 @@ impl Render for Wireless {
             _ => None,
         });
 
-        let gear = Button::new("open-settings").icon(Icon::Sliders).ghost().small().tooltip("Settings · Ctrl+,").on_click(cx.listener(
-            |this, _: &ClickEvent, _, cx| {
+        let gear = Button::new("open-settings")
+            .icon(Icon::Sliders)
+            .ghost()
+            .small()
+            .tooltip("Settings · Ctrl+,")
+            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
                 this.settings_open = !this.settings_open;
                 cx.notify();
-            },
-        ));
+            }));
         let drawer = self.settings_drawer(window, cx);
+        let station_drawer = self.station_drawer(cx);
 
         window_frame().child(power_on_in(
             "power",
@@ -514,7 +818,9 @@ impl Render for Wireless {
                 .bg(hsla(p.bg))
                 .text_color(hsla(p.fg))
                 .body(text::BASE)
-                .on_action(cx.listener(|this, _: &TogglePalette, window, cx| this.palette.update(cx, |p, cx| p.toggle(window, cx))))
+                .on_action(cx.listener(|this, _: &TogglePalette, window, cx| {
+                    this.palette.update(cx, |p, cx| p.toggle(window, cx))
+                }))
                 .on_action(cx.listener(|this, _: &OpenSettings, _, cx| {
                     this.settings_open = true;
                     cx.notify();
@@ -526,7 +832,21 @@ impl Render for Wireless {
                 .on_action(cx.listener(|this, _: &VolumeDown, _, cx| this.nudge_volume(-0.05, cx)))
                 .child(self.palette.clone())
                 .child(self.toaster.clone())
-                .child(title_bar("Wireless").child(gear))
+                .child(
+                    title_bar("Wireless")
+                        .child(
+                            Button::new("show-stations")
+                                .label("Find stations")
+                                .ghost()
+                                .small()
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.search_open = true;
+                                    this.settings_open = false;
+                                    cx.notify();
+                                })),
+                        )
+                        .child(gear),
+                )
                 .child(
                     div()
                         .id("wireless-content")
@@ -541,8 +861,18 @@ impl Render for Wireless {
                         .justify_center()
                         .child(tuner)
                         .child(meters)
-                        .child(panel("Oscilloscope").meta("OUTPUT · MONO").child(scope::scope(self.radio.waveform(), cx)))
-                        .child(div().flex().justify_center().child(marquee("ticker", self.ticker()).cells(scale_cols).color(hsla(p.fg_dim))))
+                        .child(
+                            panel("Oscilloscope")
+                                .meta("OUTPUT · MONO")
+                                .child(scope::scope(self.radio.waveform(), cx)),
+                        )
+                        .child(
+                            div().flex().justify_center().child(
+                                marquee("ticker", self.ticker())
+                                    .cells(scale_cols)
+                                    .color(hsla(p.fg_dim)),
+                            ),
+                        )
                         .when_some(problem, |col, why| {
                             col.child(
                                 div()
@@ -559,6 +889,7 @@ impl Render for Wireless {
                         }),
                 )
                 .child(drawer)
+                .child(station_drawer)
                 .child(
                     status_bar()
                         .left(if on { "ON" } else { "OFF" })
@@ -570,11 +901,30 @@ impl Render for Wireless {
     }
 }
 
-gpui::actions!(wireless, [OpenSettings, Power, SeekUp, SeekDown, VolumeUp, VolumeDown]);
+gpui::actions!(
+    wireless,
+    [OpenSettings, Power, SeekUp, SeekDown, VolumeUp, VolumeDown]
+);
 
 fn main() {
     if std::env::args().any(|arg| arg == "--version") {
         println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+        return;
+    }
+    if std::env::args().any(|arg| arg == "--smoke") {
+        match stations::search("jazz") {
+            Ok(found) if !found.is_empty() => {
+                println!("Radio Browser: {} compatible jazz stations", found.len())
+            }
+            Ok(_) => {
+                eprintln!("No compatible stations found");
+                std::process::exit(1);
+            }
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        }
         return;
     }
     gpui_platform::application().run(|cx: &mut App| {
@@ -589,7 +939,12 @@ fn main() {
             KeyBinding::new("down", VolumeDown, None),
         ]);
         // Wide enough for the dial's narrowest face at 150%.
-        let options = chrome::remembered_window_options("wireless", "Wireless", size(px(1180.), px(740.)), cx);
+        let options = chrome::remembered_window_options(
+            "wireless",
+            "Wireless",
+            size(px(1180.), px(740.)),
+            cx,
+        );
         cx.open_window(options, |window, cx| {
             chrome::square_corners(window);
             chrome::remember_window("wireless", window, cx);

@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+- Radio Browser station search, saved dial stations and Relay now-playing snapshots.
+- Bounded requests on dedicated worker threads and live-service smoke checks.
+
+
 All notable changes to Wireless are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).

@@ -9,14 +9,23 @@ pub fn scope(samples: Vec<f32>, cx: &App) -> impl IntoElement {
         |_, _, _| {},
         move |bounds: Bounds<Pixels>, _, window: &mut Window, _| {
             let center = bounds.top() + bounds.size.height / 2.;
-            window.paint_quad(fill(Bounds::new(point(bounds.left(), center), size(bounds.size.width, px(1.))), grid));
+            window.paint_quad(fill(
+                Bounds::new(
+                    point(bounds.left(), center),
+                    size(bounds.size.width, px(1.)),
+                ),
+                grid,
+            ));
             let count = samples.len().max(2);
             let step = bounds.size.width / (count - 1) as f32;
             for (i, pair) in samples.windows(2).enumerate() {
                 let y = |v: f32| center - bounds.size.height * 0.45 * v.clamp(-1., 1.);
                 let (a, b) = (y(pair[0]), y(pair[1]));
                 window.paint_quad(fill(
-                    Bounds::new(point(bounds.left() + step * i as f32, a.min(b)), size(step.max(px(1.)), (a - b).abs().max(px(1.)))),
+                    Bounds::new(
+                        point(bounds.left() + step * i as f32, a.min(b)),
+                        size(step.max(px(1.)), (a - b).abs().max(px(1.))),
+                    ),
                     ink,
                 ));
             }
