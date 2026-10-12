@@ -618,9 +618,12 @@ impl Render for Wireless {
         // width, and the frequency goes up a size when there's room.
         let viewport = window.viewport_size();
         let cell = f32::from(display_size(Scale::X1, window)) / 2.;
-        // Less the slider's readout ("107.9 MHz") to the right of the track.
-        let room_cols =
-            ((f32::from(viewport.width) - 2. * f32::from(space::ROW) - 48.) / cell) as usize - 12;
+        // Less the slider's readout ("107.9 MHz") to the right of the track,
+        // and the scrollbar's gutter.
+        let gutter = f32::from(ferrite_design::components::scroll::WIDTH);
+        let room_cols = ((f32::from(viewport.width) - 2. * f32::from(space::ROW) - 48. - gutter)
+            / cell) as usize
+            - 12;
         let scale_cols = room_cols.clamp(dial::MIN_SCALE_COLS, MAX_SCALE_COLS);
         let roomy = f32::from(viewport.width) >= 1400. && f32::from(viewport.height) >= 800.;
         let ink = if on { p.fg } else { p.fg_faint };
@@ -848,45 +851,48 @@ impl Render for Wireless {
                         .child(gear),
                 )
                 .child(
-                    div()
-                        .id("wireless-content")
-                        .flex()
-                        .flex_col()
-                        .flex_1()
-                        .min_h_0()
-                        .overflow_y_scroll()
-                        .gap(space::ROW)
-                        .p(space::ROW)
-                        // Spare height goes around the set, not under it.
-                        .justify_center()
-                        .child(tuner)
-                        .child(meters)
-                        .child(
-                            panel("Oscilloscope")
-                                .meta("OUTPUT · MONO")
-                                .child(scope::scope(self.radio.waveform(), cx)),
-                        )
-                        .child(
-                            div().flex().justify_center().child(
-                                marquee("ticker", self.ticker())
-                                    .cells(scale_cols)
-                                    .color(hsla(p.fg_dim)),
-                            ),
-                        )
-                        .when_some(problem, |col, why| {
-                            col.child(
-                                div()
-                                    .flex()
-                                    .flex_row()
-                                    .items_center()
-                                    .justify_center()
-                                    .gap_2()
-                                    .body(text::SM)
-                                    .text_color(hsla(p.fg_dim))
-                                    .child(icon(Icon::Warning).fit(px(14.)).color(hsla(p.warning)))
-                                    .child(why),
+                    scroll_area("wireless-content").flex_1().min_h_0().child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            // At least the window's height, so spare height goes
+                            // around the set; taller than that, it scrolls from the
+                            // top instead of centring the top out of reach.
+                            .min_h_full()
+                            .gap(space::ROW)
+                            .p(space::ROW)
+                            .justify_center()
+                            .child(tuner)
+                            .child(meters)
+                            .child(
+                                panel("Oscilloscope")
+                                    .meta("OUTPUT · MONO")
+                                    .child(scope::scope(self.radio.waveform(), cx)),
                             )
-                        }),
+                            .child(
+                                div().flex().justify_center().child(
+                                    marquee("ticker", self.ticker())
+                                        .cells(scale_cols)
+                                        .color(hsla(p.fg_dim)),
+                                ),
+                            )
+                            .when_some(problem, |col, why| {
+                                col.child(
+                                    div()
+                                        .flex()
+                                        .flex_row()
+                                        .items_center()
+                                        .justify_center()
+                                        .gap_2()
+                                        .body(text::SM)
+                                        .text_color(hsla(p.fg_dim))
+                                        .child(
+                                            icon(Icon::Warning).fit(px(14.)).color(hsla(p.warning)),
+                                        )
+                                        .child(why),
+                                )
+                            }),
+                    ),
                 )
                 .child(drawer)
                 .child(station_drawer)

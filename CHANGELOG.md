@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 
+- Short windows scroll from the top instead of clipping the frequency readout above the window.
 - Fix the invisible oscilloscope by giving its canvas the full panel size.
 - Radio Browser station search, saved dial stations and Relay now-playing snapshots.
 - Bounded requests on dedicated worker threads and live-service smoke checks.
