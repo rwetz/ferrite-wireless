@@ -180,3 +180,12 @@ version. Push feature branches normally; they do not publish releases.
 Find stations opens Radio Browser search. Compatible direct MP3/AAC/Vorbis streams can be saved and tuned on the dial. HLS and unsupported codecs are excluded. Relay reads Wireless's local now-playing snapshot; stale snapshots expire after ten seconds.
 
 `--smoke` verifies this integration against the live service without opening a window.
+
+---
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/brand/heptagram-white.svg">
+    <img src="docs/brand/heptagram-black.svg" alt="heptagram" width="48">
+  </picture>
+</p>
